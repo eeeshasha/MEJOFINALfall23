@@ -1,0 +1,314 @@
+---
+title: "2023 Michelin Wrapped"
+author: "Esha Shah"
+date: "2023-12-12"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE
+  )
+
+knitr::opts_knit$set(
+  root.dir = "."
+  )
+```
+
+# Michelin Wrapped: The 26 San Franciscan Michelin Star Restaurants of 2023.
+
+This data analysis intends to provide more insight into the 26 Michelin star restaurants currently active in the city of San Francisco.
+
+Linked here is the written file with more context and details into the process of this analysis: [Written File](https://docs.google.com/document/d/1CRTRB3LISaMwQ_VGiasA8ElLtG3KSP_aiOjc_KAztVw/edit){.uri}
+
+### 1. Load data and load packages into library
+
+To start off, load in the Registered Businesses csv and the Michelin csv.
+
+```{r initialize}
+library(tidyverse)
+library(dplyr)
+library(janitor)
+library(readxl)
+
+#Source: https://data.cityofnewyork.us/Health/DOHMH-New-York-City-Restaurant-Inspection-Results/43nn-pn8j
+registered_businesses <- read_csv("Registered_Business_Locations_-_San_Francisco.csv")
+registered_businesses <- registered_businesses %>% janitor::clean_names()
+
+#Source: made myself from Michelin guides - contains name of the restaurant, number of stars, cuisine, and 
+michelin_2023 <- read_excel("Michelin San Francisco.xlsx")
+```
+
+### 2. Clean Registered Businesses dataset
+
+The Registered Businesses dataset is a huge table with every single registered business that pays taxes/is licensed in San Francisco and a few neighboring cities. This includes restaurants, retail stores, warehouses, and more. Let's work on cleaning up this data set and isolating the elements that we will actually use.
+
+```{r}
+#Select only relevant columns and get rid of those with mostly NA values. At the same time, we can make some of the column names easier.
+
+registered_businesses <- registered_businesses %>% select(name = dba_name, 
+                                                          address = street_address, 
+                                                          city, 
+                                                          state, 
+                                                          zipcode = source_zipcode,
+                                                          business_start_date, 
+                                                          neighborhood = neighborhoods_analysis_boundaries, 
+                                                          business_location)
+```
+
+```{r}
+#Filter for only businesses with cities listed as "San Francisco", because that is the region we are focusing this project on.
+
+registered_businesses <- filter(registered_businesses, city == "San Francisco")
+registered_businesses
+  
+#Great! Now there are 256,968 rows instead of 317,364, which means there were 60,396 businesses in the table that weren't actually in San Francisco City. 
+```
+
+### 3. Learn about registered business trends over the last 10 years
+
+From the Registered Business dataset, we have access to the business start dates for each business. This could be an interesting piece of analysis. Let's look over the data from the past 10 years and see if there is a trend. This could give us information about the state of investing and entrepreneurship in SF since 2012.
+
+```{r}
+library(lubridate)
+library(ggplot2)
+
+dates <- registered_businesses %>%
+  select(name, business_start_date)
+
+dates$business_start_date <- mdy(dates$business_start_date)
+str(dates)
+```
+
+```{r}
+dates<- dates %>% 
+  mutate(year = year(business_start_date)) %>%
+  filter(year >= 2012)
+
+dates
+                
+dates %>%
+  ggplot(aes(x = year)) +
+  geom_line(stat = "count", color = "#004f9f", size=1) +
+  scale_x_continuous(breaks = c(2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023), labels = c("2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023")) +
+  labs(title = "Businesses Registered in SF Over the Last 10 years", x = "Date", y = "Businesses Registered")
+```
+
+It looks like there is a decreasing trend for businesses being registered since 2016. There is a large dip in 2020, which could be due to COVID, and since then, we have been at a steady rate. 2023 data is still being collected, so the drop off at the end is not significant right now.
+
+### 4. Explore the neighborhoods of San Francisco
+
+Now that we can look at our dataset more clearly since it has been cleaned, let's explore the structure of San Francisco a bit more. The city of San Francisco is organized into neighborhoods. How many are there where businesses are being registered?
+
+```{r}
+neighborhoods <- registered_businesses %>%
+  group_by(neighborhood) %>%
+  count()%>%
+  arrange(desc(n))
+
+neighborhoods
+```
+
+Looks like the Financial District/South Beach neighborhood has the most amount of active registered businesses.
+
+There are 41 neighborhoods (the last row is used for extra data) where businesses are being registered. San Francisco has 41 neighborhoods. This means, as one may expect, that there are active businesses present in every neighborhood in San Francisco.
+
+There is a dataset on the San Francisco city data portal that contains the name of each neighborhood and a geom for each, which represents a polygon. If we join these tables together, we can use leaflet to plot these polygons.
+
+```{r}
+#Load in the csv file
+
+neighborhoods_shape <- read_csv("San_Francisco_Analysis_Neighborhoods.csv")
+
+#Join the new file with our grouped registered businesses file to add the polygon column from the new file into our old file.
+
+neighborhoods_combined <- left_join(neighborhoods_shape, neighborhoods, by = c("nhood" = "neighborhood"))
+neighborhoods_combined
+```
+
+```{r}
+#install.packages(c("sf", "leaflet"))
+#Let's plot this on a map using leaflet
+
+library(sf)
+library(leaflet)
+
+neighborhoods_sf <- st_as_sf(neighborhoods_combined, wkt = "the_geom")
+
+map <- neighborhoods_sf %>%
+  leaflet() %>%
+  addProviderTiles("CartoDB.VoyagerLabelsUnder") %>%
+  addPolygons(weight = 2, color="gray", label= ~paste0(nhood), highlight = highlightOptions(weight=3, color = "red", bringToFront = TRUE))
+
+map
+```
+
+### 4. Plotting the Michelin star restaurants in SF
+
+First, join the Michelin_2023 table and the registered_businesses table. By doing this, we can only keep the businesses in the large table that are Michelin star restaurants. We also have to make sure to remove duplicates.
+
+```{r}
+michelin <- left_join(michelin_2023,registered_businesses, by = "name") %>%
+    distinct(name, .keep_all = TRUE)
+michelin
+```
+
+To make the data plottable, we can use a loop and an API key to get the longitude and latitude of each address. This was made possible with a bit of help from a few Google searches.
+
+```{r}
+#install.packages("ggmap")
+library(ggmap)
+library(dplyr)
+
+register_google(key = "d1f1df5b9948fc21332b7b9908e025c042751e7d", write=TRUE)
+
+michelin <- michelin %>%
+  mutate(full_address = NA_real_,
+          latitude = NA_real_,
+         longitude = NA_real_)
+
+for (i in seq(nrow(michelin))) {
+  street <- michelin$address[i]
+  city <- michelin$city[i]
+  state <- michelin$state[i]
+  zip <- michelin$zipcode[i]
+  add <- paste0(street, ", ", city, ", ", state, ", ", zip)
+  michelin$full_address[i] <- add
+  geo_data <- ggmap::geocode(michelin$full_address[i])
+  michelin$latitude[i] <- geo_data$lat
+  michelin$longitude[i] <- geo_data$lon
+} 
+
+michelin
+```
+
+```{r}
+#Plot the data
+library(sf)
+library(leaflet)
+
+points_sf <- st_as_sf(michelin, wkt = "business_location")
+
+map <- addMarkers(map, data = points_sf, ~longitude, ~latitude, popup = ~name) %>%
+  addProviderTiles("CartoDB.VoyagerLabelsUnder")
+
+map
+```
+
+Some neighborhoods look like they have a higher quantity of Michelin star restaurants, while others have none at all. Let's find out how many each one has.
+
+```{r}
+
+district_michelin <- michelin %>%
+  group_by(neighborhood) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+
+district_michelin
+```
+
+It looks like only 14 of the 41 neighborhoods contain Michelin star restaurants while the others have none.
+
+```{r}
+#Plot this data on a bar chart
+
+district_michelin %>%
+  ggplot(aes(x = neighborhood, y = count)) +
+  geom_col(fill = "#004f9f") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Number of Michelin Star Restaurants", x = "District", y = "Michelin Star Restaurants")
+```
+
+The Financial District/South Beach neighborhood has the most Michelin Star Restaurants - 5 of them! This is consistent with the fact that they have the most number of active businesses in general, which we found earlier.
+
+### 5. The most popular cuisine and the correlation with demographics
+
+It would also be interesting to see what the most popular cuisine for a Michelin Star restaurant in San Francisco is.
+
+```{r}
+cuisine <- michelin %>%
+  group_by(cuisine) %>%
+  count() %>%
+  arrange(desc(n))
+
+cuisine
+```
+
+We can group Japanese, Korean, Chinese, and Thai cuisines together under the broader category of Asian food.
+
+```{r}
+michelin <- michelin %>%
+  mutate(grouped_cuisine = recode(cuisine, 'Japanese' = 'Asian', 'Korean' = 'Asian', 'Chinese' = 'Asian', 'Thai' = 'Asian'))
+
+cuisine <- michelin %>%
+  group_by(grouped_cuisine) %>%
+  count() %>%
+  arrange(desc(n))
+
+
+cuisine
+```
+
+The most popular food is contemporary. The second most popular cuisine is Asian.
+
+Food is a great reflection of the people that a place represents. Maybe the most popular cuisines - Contemporary and Asian - reflect the demographics of people in San Francisco. This could be because of higher demand for these types of foods. Lets use census data to try and visualize this.
+
+```{r}
+library(tidycensus)
+census_api_key("d1f1df5b9948fc21332b7b9908e025c042751e7d", overwrite=TRUE, install= TRUE)
+
+variables <- c(
+  total = "B01001_001",
+  white = "B02001_002",
+  black = "B02001_003",
+  american_indian_alaska_native = "B02001_004",
+  asian = "B02001_005",
+  hawaiian_pacific_islander = "B02001_006",
+  other = "B02001_007",
+  two_or_more = "B02001_008"
+)
+
+sf_population <- get_acs(
+  geography = "county",
+  variables = variables,
+  state = "CA",
+  county = "075",
+)
+
+head(sf_population)
+```
+
+```{r}
+sf_population <- sf_population %>%
+  mutate(percentage = estimate/865933)
+sf_population <- subset(sf_population, variable != "total")
+sf_population
+```
+
+```{r}
+sum(sf_population$percentage) #just for verification
+```
+
+```{r}
+pie_chart <- ggplot(sf_population, aes(x = "", y = percentage, fill = variable)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar("y") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set3") +
+  labs(title = "Population Proportions by Race in San Francisco")
+
+pie_chart <- pie_chart +
+  labs(
+    title = "Population Distribution by Race",
+    fill = "Race",
+    caption = "Source: Census Bureau Data"
+  )
+
+pie_chart
+```
+
+There seems to be a large Asian population, with Asians making up 34% of the population - the second most populous group. This may be correlated with the number of Michelin star restaurants in San Francisco that serve Asian food.
+
+Food is something that can be very unifying, and the Michelin star system represents distinction for those restaurants that do an especially exquisite job at delivering an unforgettable dining experience. As we head into the new year and wait for 2024's Michelin guide release, let's be sure to share a few bites to eat with those that we love.
