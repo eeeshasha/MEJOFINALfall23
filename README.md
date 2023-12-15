@@ -2,7 +2,7 @@
 Esha Shah
 
 Write Up: https://docs.google.com/document/d/1CRTRB3LISaMwQ_VGiasA8ElLtG3KSP_aiOjc_KAztVw/edit \
-Registered_Business Database: https://data.sfgov.org/Economy-and-Community/Registered-Business-Locations-San-Francisco/g8m3-pdis/data \
+Registered_Business Database: https://data.sfgov.org/Economy-and-Community/Registered-Business-Locations-San-Francisco/g8m3-pdis/data
 
 # Introduction
 
